@@ -64,11 +64,17 @@ trace. A `-10`-style miss shows as a meeting in `game.stdout.log` with no
 
 ## Ship it
 
+Requires `coworld>=0.1.20` (earlier versions can't parse the server's current
+image-upload response and fail). With that, the normal CLI works:
+
 ```bash
 uv run softmax login          # once per machine
 scripts/build.sh shivvy:latest
-scripts/submit.sh shivvy:latest shivvy
+scripts/submit.sh shivvy:latest shivvy   # coworld upload-policy + submit
 ```
+
+(`scripts/upload_submit_workaround.py` was a stopgap for the broken-upload
+window and is now obsolete — kept only as a reference for the raw push flow.)
 
 ## Debug the live league remotely (no local runs)
 
@@ -88,9 +94,11 @@ To run a controlled batch of a specific policy version against the real field
 uv run python scripts/xp_request.py <requester_policy_version_id> -n 100
 ```
 
-It POSTs the Observatory API directly (the CLI has no command for this) with the
-requester + the top-7 Daily champions as an explicit 8-player roster. Works even
-while the policy is still "qualifying". Then pull scores by filtering
+It POSTs the Observatory API directly because the CLI still has **no**
+experience-request command (confirmed through coworld 0.1.20 — only `upload` was
+fixed there, not XP). The script uses the requester + the top-7 Daily champions
+as an explicit 8-player roster. Works even while the policy is still
+"qualifying". Then pull scores by filtering
 `coworld episodes --mine --json` to that policy_version_id (the XP uses the
 league's current canonical coworld, which may be newer than your local one — key
 off the policy_version_id, not coworld_id).

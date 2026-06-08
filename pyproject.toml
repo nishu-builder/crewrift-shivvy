@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Shivvy: a CrewRift social-deduction player and its dev harness."
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "coworld[auth]>=0.1.16",
+    # >=0.1.20: earlier versions reject the server's new image-upload response
+    # (authorization_token instead of credentials), breaking `upload-policy`.
+    "coworld[auth]>=0.1.20",
 ]
 
 [tool.uv]

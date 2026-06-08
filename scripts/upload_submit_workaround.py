@@ -1,4 +1,7 @@
-"""Upload + submit a policy, working around a broken CLI upload path.
+"""OBSOLETE as of coworld 0.1.20 — use `scripts/submit.sh` (normal CLI) instead.
+Kept only as a reference for the raw ECR push flow if uploads break again.
+
+Upload + submit a policy, working around a broken CLI upload path.
 
 As of the 0.1.40 rollout the server changed the image-upload contract: the
 /observatory/v2/container_images/upload response now returns
