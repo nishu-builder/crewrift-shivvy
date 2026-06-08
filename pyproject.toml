@@ -1,0 +1,11 @@
+[project]
+name = "crewrift-shivvy"
+version = "0.1.0"
+description = "Shivvy: a CrewRift social-deduction player and its dev harness."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "coworld[auth]>=0.1.16",
+]
+
+[tool.uv]
+package = false
