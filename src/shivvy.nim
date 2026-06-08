@@ -94,6 +94,13 @@ const
   StuckFrameThreshold = 8
   JiggleDuration = 16
   TaskHoldPadding = 8
+  # Abandon a task we cannot get closer to. If navigation spends this many
+  # frames without improving its best distance-to-goal by TaskStallProgress px,
+  # the task is unreachable from here (or a bad guess); blacklist it for
+  # TaskAvoidDuration so we do other tasks instead of freezing on it.
+  TaskStallTicks = 150
+  TaskStallProgress = 8
+  TaskAvoidDuration = 1200
   CrewmateSearchRadius = 1
   CrewmateMaxMisses = 8
   CrewmateMinStablePixels = 8
@@ -376,6 +383,9 @@ type
     goalY: int
     goalIndex: int
     goalName: string
+    goalTrackIndex: int
+    goalBestDist: int
+    goalStallTicks: int
     hasGoal: bool
     hasPathStep: bool
     pathStep: PathStep
@@ -406,6 +416,7 @@ type
     radarTasks: seq[bool]
     checkoutTasks: seq[bool]
     taskStates: seq[TaskState]
+    taskAvoidUntil: seq[int]
     taskIconMisses: seq[int]
     lastTaskRadarResetTick: int
     visibleTaskIcons: seq[IconMatch]
@@ -1134,6 +1145,7 @@ proc resetTaskKnowledge(bot: var Bot) =
   bot.radarTasks = newSeq[bool](bot.sim.tasks.len)
   bot.checkoutTasks = newSeq[bool](bot.sim.tasks.len)
   bot.taskStates = newSeq[TaskState](bot.sim.tasks.len)
+  bot.taskAvoidUntil = newSeq[int](bot.sim.tasks.len)
   bot.taskIconMisses = newSeq[int](bot.sim.tasks.len)
   bot.spriteRadarTasks = newSeq[bool](bot.sim.tasks.len)
   bot.spriteIconTasks = newSeq[bool](bot.sim.tasks.len)
@@ -1263,6 +1275,8 @@ proc resetRoundState(bot: var Bot) =
   bot.stuckFrames = 0
   bot.jiggleTicks = 0
   bot.jiggleSide = 0
+  bot.goalTrackIndex = -1
+  bot.goalStallTicks = 0
   bot.desiredMask = 0
   bot.controllerMask = 0
   bot.taskHoldTicks = 0
@@ -1342,6 +1356,8 @@ proc reseedLocalizationAtHome(bot: var Bot) =
   bot.stuckFrames = 0
   bot.jiggleTicks = 0
   bot.jiggleSide = 0
+  bot.goalTrackIndex = -1
+  bot.goalStallTicks = 0
   bot.desiredMask = 0
   bot.controllerMask = 0
   bot.taskHoldTicks = 0
@@ -3652,6 +3668,9 @@ proc taskGoalFor(
   ## Returns a reachable task goal inside one task rectangle.
   if index < 0 or index >= bot.sim.tasks.len:
     return
+  if bot.taskAvoidUntil.len == bot.sim.tasks.len and
+      bot.taskAvoidUntil[index] > bot.frameTick:
+    return
   let
     task = bot.sim.tasks[index]
     center = task.taskCenter()
@@ -5074,6 +5093,27 @@ proc decideNextMaskInner(bot: var Bot): uint8 {.measure.} =
   bot.goalY = goal.y
   bot.goalIndex = goal.index
   bot.goalName = goal.name
+  if goal.index >= 0:
+    let gd = bot.goalDistance(goal.x, goal.y)
+    if goal.index != bot.goalTrackIndex:
+      bot.goalTrackIndex = goal.index
+      bot.goalBestDist = gd
+      bot.goalStallTicks = 0
+    elif gd <= bot.goalBestDist - TaskStallProgress:
+      bot.goalBestDist = gd
+      bot.goalStallTicks = 0
+    else:
+      inc bot.goalStallTicks
+      if bot.goalStallTicks >= TaskStallTicks and
+          bot.taskAvoidUntil.len == bot.sim.tasks.len:
+        bot.taskAvoidUntil[goal.index] = bot.frameTick + TaskAvoidDuration
+        bot.goalTrackIndex = -1
+        bot.goalStallTicks = 0
+        bot.clearPath()
+        bot.hasGoal = false
+        bot.intent = "abandon unreachable " & goal.name
+        bot.thought(bot.intent)
+        return 0
   if goal.index >= 0 and
       bot.taskGoalReady(goal) and
       (
