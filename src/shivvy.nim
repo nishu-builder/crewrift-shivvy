@@ -4377,6 +4377,38 @@ proc clearInvalidBodySusChat(bot: var Bot) =
   if (" " & bot.pendingChat.normalizeChatText() & " ").contains(" sus "):
     bot.pendingChat = ""
 
+proc chatConsensusTarget(bot: Bot): int =
+  ## Returns a color accused as sus by at least two *distinct* crewmates in vote
+  ## chat -- a real ejection consensus worth joining so imposters actually get
+  ## voted out instead of us skipping every meeting. Requiring corroboration is
+  ## the safety guard: a lone accuser may be a lying imposter, and voting out a
+  ## crewmate is the worst thing a crewmate can do.
+  if bot.role == RoleImposter or bot.selfColorIndex < 0:
+    return VoteUnknown
+  var accusers: array[PlayerColorCount, seq[int]]
+  for line in bot.voteChatLines:
+    let accused = chatSusColorIndex(line.text)
+    if accused < 0 or accused >= PlayerColorCount:
+      continue
+    if accused == bot.selfColorIndex or line.speakerColor < 0:
+      continue
+    if line.speakerColor == accused:
+      continue
+    if line.speakerColor notin accusers[accused]:
+      accusers[accused].add(line.speakerColor)
+  var bestColor = VoteUnknown
+  var bestCount = 1
+  for color in 0 ..< PlayerColorCount:
+    if accusers[color].len > bestCount:
+      bestCount = accusers[color].len
+      bestColor = color
+  if bestColor == VoteUnknown:
+    return VoteUnknown
+  let slot = bot.voteSlotForColor(bestColor)
+  if bot.voteTargetSafeForRole(slot):
+    return slot
+  VoteUnknown
+
 proc desiredVotingDecision(
   bot: Bot,
   listenedTicks: int
@@ -4425,6 +4457,13 @@ proc desiredVotingDecision(
       revengeTarget,
       bot.voteTargetName(revengeTarget) & " voted for me",
       true
+    )
+  let consensusTarget = bot.chatConsensusTarget()
+  if consensusTarget != VoteUnknown:
+    return (
+      consensusTarget,
+      "joining crew consensus against " & bot.voteTargetName(consensusTarget),
+      false
     )
   (
     bot.votePlayerCount,
