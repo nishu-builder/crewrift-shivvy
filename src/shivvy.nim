@@ -154,6 +154,10 @@ const
   VotePanicTicks = VoteDeadlineTicks * 9 div 10
   BodySuspectRange = 64
   ImposterHuntDelayTicks = 500
+  # A crewmate sitting on a task station is stationary and distracted, so it is
+  # catchable -- unlike a moving crewmate, which an equal-speed tail-chase never
+  # closes. The imposter prefers victims within this radius of a task center.
+  ImposterTaskAmbushRadius = 32
   ButtonResetCooldownLeadTicks = 150
   ProtocolMapName = "sprite protocol map"
   ButtonResetChat = "just resetting imposter cool downs"
@@ -3876,11 +3880,23 @@ proc visibleCrewmateWorld(
     bot.cameraY + crewmate.y + SpriteDrawOffY
   )
 
+proc nearTaskStation(bot: Bot, wx, wy: int): bool =
+  ## Returns true when a world point sits on a task station -- a likely
+  ## stationary, distracted crewmate doing a task, and therefore catchable.
+  for task in bot.sim.tasks:
+    let c = taskCenter(task)
+    if heuristic(wx, wy, c.x, c.y) <= ImposterTaskAmbushRadius:
+      return true
+  false
+
 proc nearestVisibleCrewmate(
   bot: Bot
 ): tuple[found: bool, crewmate: CrewmateMatch] =
-  ## Returns the nearest visible crewmate not known as an imposter.
+  ## Returns the best visible kill target not known as an imposter: prefer the
+  ## nearest crewmate parked on a task (catchable), else the nearest overall.
   var bestDistance = high(int)
+  var bestParked = high(int)
+  var parked: tuple[found: bool, crewmate: CrewmateMatch]
   for crewmate in bot.visibleCrewmates:
     if crewmate.colorIndex == bot.selfColorIndex:
       continue
@@ -3896,6 +3912,11 @@ proc nearestVisibleCrewmate(
     if distance < bestDistance:
       bestDistance = distance
       result = (true, crewmate)
+    if bot.nearTaskStation(world.x, world.y) and distance < bestParked:
+      bestParked = distance
+      parked = (true, crewmate)
+  if parked.found:
+    return parked
 
 proc visibleBodyWorld(bot: Bot, body: BodyMatch): tuple[x: int, y: int] =
   ## Converts one visible body match into world coordinates.
