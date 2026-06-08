@@ -98,8 +98,12 @@ uv run coworld episode-stats <ereq_id> --json                          # per-pla
    now returns true whenever `imposterKillReady`, so the imposter stops faking and
    hunts the moment a kill is available (previously it re-entered a 500-tick fake
    delay after every meeting). Self-play traces show both imposters now actively
-   `hard chase`/`kill`. Next: lower `ImposterHuntDelayTicks` for faster
-   re-positioning, isolate victims, and use vents.
+   `hard chase`/`kill`. Kill-connect improved by pulsing `ButtonA` (edge-
+   triggered, like vote confirm) and combining it with continued approach so an
+   edge-of-`killRange` miss closes to point-blank and connects next frame --
+   self-play now shows both imposters landing 2 kills and occasional imposter
+   *wins*. Next: lower `ImposterHuntDelayTicks` for faster re-positioning,
+   isolate victims, and use vents.
 3. **Crew social deduction.** Track alibis / vent sightings / proximity-to-body
    and vote real imposters; never vote out a crewmate without strong evidence.
 4. **Task routing.** Avoid oscillation; order tasks (nearest / simple TSP) to

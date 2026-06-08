@@ -4865,11 +4865,16 @@ proc attackVisibleCrewmate(
   if bot.imposterKillReady and bot.inKillRange(target.x, target.y):
     bot.imposterGoalIndex = bot.farthestFakeTargetIndex()
     bot.intent = "kill " & name
-    bot.desiredMask = ButtonA
-    bot.controllerMask = ButtonA
+    # The kill is edge-triggered (like vote confirm), so holding ButtonA every
+    # frame fires only once -- an edge-of-range miss then never re-fires. Pulse
+    # ButtonA (re-press each frame) and keep nudging toward the victim so we
+    # close to point-blank instead of drifting out of the ~20px killRange.
+    let press = if (bot.lastMask and ButtonA) != 0: 0'u8 else: ButtonA
+    bot.desiredMask = press or bot.hardChaseMask(target.x, target.y)
+    bot.controllerMask = bot.desiredMask
     bot.clearPath()
     bot.thought(name & " in range, attacking")
-    return ButtonA
+    return bot.desiredMask
   bot.goalIndex = -2
   bot.hasGoal = true
   bot.goalX = target.x
