@@ -90,14 +90,16 @@ uv run coworld episode-stats <ereq_id> --json                          # per-pla
 
 ## Prioritized backlog
 
-1. **Vote failsafe** (kills the `-40` tail). In `decideVotingMask` /
-   `desiredVotingDecision`: if on a vote screen and no cast has registered by
-   ~70% of `voteTimerTicks`, force a SKIP cast. Verify a 3× scrim shows no slot
-   scoring `≤ -10`.
-2. **Imposter aggression** (biggest upside). Lower `ImposterHuntDelayTicks`, hunt
-   the nearest isolated crewmate right after role reveal, and don't break off a
-   chase when `imposterKillReady` and a victim is near `killRange`. Target:
-   imposters score `> 0` and sometimes win in self-play.
+1. **Vote failsafe** (kills the `-40` tail). *Done* — `decideVotingMask` forces a
+   SKIP cast past `VoteFailsafeTicks` (2/3 of the timer) and mashes confirm past
+   `VotePanicTicks` (90%). Dormant in normal voting; confirm via `league-logs.sh`
+   that live episodes no longer score `-40`.
+2. **Imposter aggression** (biggest upside). *Done (v1)* — `imposterHuntActive`
+   now returns true whenever `imposterKillReady`, so the imposter stops faking and
+   hunts the moment a kill is available (previously it re-entered a 500-tick fake
+   delay after every meeting). Self-play traces show both imposters now actively
+   `hard chase`/`kill`. Next: lower `ImposterHuntDelayTicks` for faster
+   re-positioning, isolate victims, and use vents.
 3. **Crew social deduction.** Track alibis / vent sightings / proximity-to-body
    and vote real imposters; never vote out a crewmate without strong evidence.
 4. **Task routing.** Avoid oscillation; order tasks (nearest / simple TSP) to

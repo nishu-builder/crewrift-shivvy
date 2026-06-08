@@ -146,6 +146,12 @@ const
   VoteListenJitterTicks = VoteDeadlineTicks div 16
   VoteImposterSkipTicks = VoteListenBaseTicks + VoteListenJitterTicks
   VoteRetryTicks = sim.TargetFps div 2
+  # Failsafe thresholds (ticks into a meeting) to never eat the -10
+  # "did not vote and did not skip" penalty when the normal cursor-nav path
+  # stalls. Past VoteFailsafeTicks we force a skip; past VotePanicTicks we mash
+  # confirm on whatever cell is selected. See decideVotingMask.
+  VoteFailsafeTicks = VoteDeadlineTicks * 2 div 3
+  VotePanicTicks = VoteDeadlineTicks * 9 div 10
   BodySuspectRange = 64
   ImposterHuntDelayTicks = 500
   ButtonResetCooldownLeadTicks = 150
@@ -4421,6 +4427,30 @@ proc decideVotingMask(bot: var Bot): uint8 {.measure.} =
         "voted " & bot.voteTargetName(ownVote)
     bot.thought(bot.intent)
     return bot.desiredMask
+  # Failsafe: a registered vote has not been seen and the timer is running out.
+  # The normal cursor-nav/listen path below sometimes never lands a cast (cursor
+  # parse noise, oscillation), which costs -10. Guarantee a cast: drive to SKIP,
+  # then in the final window mash confirm on whatever is selected.
+  if listenedTicks >= VotePanicTicks:
+    bot.voteTarget = bot.votePlayerCount
+    bot.desiredMask = bot.voteConfirmMask()
+    bot.controllerMask = bot.desiredMask
+    bot.intent = "failsafe panic confirm at " & $listenedTicks
+    bot.thought(bot.intent)
+    return bot.desiredMask
+  if listenedTicks >= VoteFailsafeTicks:
+    bot.voteTarget = bot.votePlayerCount
+    if bot.voteCursor == bot.votePlayerCount:
+      bot.desiredMask = bot.voteConfirmMask()
+      bot.intent = "failsafe skip cast at " & $listenedTicks
+    else:
+      let direction = bot.voteMoveDirection(bot.votePlayerCount)
+      let mask = if direction < 0: ButtonLeft else: ButtonRight
+      bot.desiredMask = if bot.lastMask == mask: 0 else: mask
+      bot.intent = "failsafe cursor to skip at " & $listenedTicks
+    bot.controllerMask = bot.desiredMask
+    bot.thought(bot.intent)
+    return bot.desiredMask
   if bot.voteCursor != bot.voteTarget:
     let direction = bot.voteMoveDirection(bot.voteTarget)
     let mask =
@@ -4753,8 +4783,14 @@ proc pressButtonResetAction(bot: var Bot): uint8 =
 
 proc imposterHuntActive(bot: Bot): bool =
   ## Returns true when the imposter should stop faking and hunt players.
-  bot.roundStartTick >= 0 and
-    bot.frameTick - bot.roundStartTick >= ImposterHuntDelayTicks
+  ## Hunt the moment a kill is actually available (the HUD shows kill-ready) --
+  ## there is no reason to keep faking tasks when we can kill -- otherwise wait
+  ## out the post-spawn/post-meeting settle delay so we blend in first. The
+  ## delay resets every meeting, so without the kill-ready shortcut the imposter
+  ## wastes hundreds of ticks faking after each emergency button spam.
+  bot.imposterKillReady or
+    (bot.roundStartTick >= 0 and
+      bot.frameTick - bot.roundStartTick >= ImposterHuntDelayTicks)
 
 proc navigateToPoint(
   bot: var Bot,

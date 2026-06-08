@@ -54,6 +54,9 @@ FROM debian:bookworm-slim
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates libcurl4 && \
   rm -rf /var/lib/apt/lists/*
-WORKDIR /workspace
+# The bot setCurrentDir's into its build-time game dir (/workspace/crewrift) on
+# startup; create it so the headless binary runs (it reads map/walkability from
+# the sprite stream, not from disk, so the dir can be empty).
+WORKDIR /workspace/crewrift
 COPY --from=build /workspace/crewrift/shivvy /bin/shivvy
 CMD ["/bin/shivvy"]
