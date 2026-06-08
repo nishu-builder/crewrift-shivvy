@@ -45,10 +45,13 @@ src/shivvy/votereader.nim   vote-screen pixel reader (forked)
 Dockerfile              fetches pinned coworld-crewrift + bitworld, overlays src/, compiles
 pyproject.toml          uv project; CLI = PyPI coworld[auth]
 scripts/                build / scrim / replay / submit / league-logs helpers
+docs/FINDINGS.md        START HERE to continue: current state, what worked/didn't, next directions
 docs/GAME.md            rules, scoring, full game config
 docs/DIAGNOSIS.md       why we rank low, with evidence
-docs/ITERATION.md       the dev loop, log format, and prioritized backlog
+docs/ITERATION.md       the dev loop (build/scrim/replay/submit/XP), log format, backlog
 AGENTS.md               how an AI agent should continue this work
+scripts/xp_request.py   measure a policy vs the live field (raw API; no CLI command exists)
+scripts/set_champion.py elect/list champions (raw API; no CLI command exists)
 ```
 
 We depend on the CrewRift engine (`src/crewrift/*`, `bitworld`) as a pinned

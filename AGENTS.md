@@ -1,9 +1,11 @@
 # AGENTS.md — continuing Shivvy
 
-You are improving the Shivvy CrewRift player. Read `README.md`, then
-`docs/DIAGNOSIS.md` (what's wrong and where the points are) and
-`docs/ITERATION.md` (the build/run/log/submit loop). `docs/GAME.md` is the rules
-and scoring contract.
+You are improving the Shivvy CrewRift player. **Start with `docs/FINDINGS.md`** —
+the running handoff log of current state, what worked/didn't, and prioritized
+future directions. Then `README.md`, `docs/DIAGNOSIS.md` (what's wrong and where
+the points are), `docs/ITERATION.md` (the build/run/log/submit + XP loop), and
+`docs/GAME.md` (rules and scoring contract). Keep `docs/FINDINGS.md` updated as
+you learn.
 
 ## Working agreement
 
