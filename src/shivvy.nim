@@ -5028,6 +5028,19 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
         fleeGoal.y,
         "flee body to " & fleeGoal.name
       )
+  # On cooldown (not yet huntActive) with no body to flee: shadow the nearest
+  # crewmate so we are already in range the instant the kill comes off cooldown,
+  # instead of faking a distant task. Aggressive imposter: maximize kills to
+  # thin the crew below the imposter count before they finish their tasks.
+  let stalk = bot.nearestVisibleCrewmate()
+  if stalk.found:
+    let target = bot.visibleCrewmateWorld(stalk.crewmate)
+    bot.goalIndex = -2
+    return bot.navigateToPoint(
+      target.x,
+      target.y,
+      "stalking " & playerColorName(stalk.crewmate.colorIndex)
+    )
   if bot.imposterGoalIndex < 0 or
       bot.imposterGoalIndex >= bot.fakeTargetCount():
     bot.imposterGoalIndex = bot.randomFakeTargetIndex()

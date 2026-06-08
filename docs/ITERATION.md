@@ -127,3 +127,13 @@ uv run coworld episode-stats <ereq_id> --json                          # per-pla
 
 Always: change one capability, scrim, read the trace, confirm the intended
 behavior changed and scores moved, then submit.
+
+## Gotcha: engine repo now needs auth to clone
+
+`Metta-AI/coworld-crewrift` is no longer anonymously cloneable, so the
+Dockerfile's in-build `git clone` only works because the clone layer is cached
+from an earlier build. A from-scratch build, or **bumping `CREWRIFT_ENGINE_REF`**
+(which busts that cache), will fail with "could not read Username for github".
+To adopt a newer engine pin, vendor a local authed clone and `COPY` it in (or
+pass a build secret) instead of cloning in-build. We currently build against
+0.1.39 (`716fc42`); it runs fine in the live 0.1.40 league.
