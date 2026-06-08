@@ -79,6 +79,22 @@ scripts/league-logs.sh shivvy 5     # pull our agent trace + game log for 5 rece
 Because the verbose trace is baked into the image, live league episodes carry
 the same per-tick narration — read them straight from `league-logs/<ts>/`.
 
+## Measure a policy vs the live field on demand (XP request)
+
+To run a controlled batch of a specific policy version against the real field
+(not wait for live rounds), fire an experience request:
+
+```bash
+uv run python scripts/xp_request.py <requester_policy_version_id> -n 100
+```
+
+It POSTs the Observatory API directly (the CLI has no command for this) with the
+requester + the top-7 Daily champions as an explicit 8-player roster. Works even
+while the policy is still "qualifying". Then pull scores by filtering
+`coworld episodes --mine --json` to that policy_version_id (the XP uses the
+league's current canonical coworld, which may be newer than your local one — key
+off the policy_version_id, not coworld_id).
+
 ## Refreshing the diagnosis numbers
 
 ```bash
