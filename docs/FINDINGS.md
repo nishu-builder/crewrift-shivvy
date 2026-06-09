@@ -193,6 +193,19 @@ whole deficit is crew losses; +25% crew win rate ~= +19 mean. Imposter is fine.
 **Measurement:** n>=100 fixed-roster A/B per change; compare crew-loss subset and own
 task count, not just the mean (+-8 noise floor).
 
+**A/B RESULT — v12 patrol fix (2026-06-09, n=100 each, matched roster):** mechanism
+works, mean doesn't move. v12 (xreq_99dd4fde) 33.07 vs v11 (xreq_be10ad2c) 36.25 —
+within noise. Mechanism confirmed: v12 logs have ZERO "no task goal" stalls (vs 21 in
+the v11 sample) and 5-6-point loss games halved (12 vs 26; crew-loss mean 6.92 vs
+6.56). Why no mean gain: vs this (now harsher — Andre shipped new notsus/truecrew the
+same evening, crew win% ~8-16 for BOTH versions) roster, crew losses end early on
+kills; the salvaged 1-2 task points are worth ~+0.3 mean, and the hypothesized
+allTasksDone win-flips need long stalemate games that this field no longer produces.
+**v12 NOT submitted** (rule: must beat champion on matched run). Keep the patrol fix
+(strictly positive, risk-free) and stack lever #2 (button timing) on top, then re-A/B
+the stack. Note: roster strength is drifting fast intra-day — always rerun the v-control
+alongside any candidate, never reuse an old control run.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
