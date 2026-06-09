@@ -93,6 +93,34 @@ vote-eject. Code: `detectVentSightings` / `onVentCenter` / `worldInSafeView` +
   step (left for a human call). The XP-vs-policy_version_id path still works
   regardless of division state.
 
+## UPDATE 2026-06-09 (qualifier wedge ROOT-CAUSED: champion-in-staging bug; v11 re-queued)
+
+Why v11 sat unselected in Qualifiers for ~10h while the commissioner cycled
+Richard's submissions (read straight from app_backend v2 source in the m1 repo):
+
+- **The champion endpoint strands staging memberships.** `promote_league_policy_
+  membership_to_champion` unconditionally sets `status=competing`, but qualifier
+  rounds only select memberships with `status=qualifying`
+  (`v2/membership_filters.py::division_entrants`). Our `set_champion.py shivvy:v11`
+  call (on its Qualifiers membership) flipped it `qualifying→competing` — invisible
+  to the commissioner forever. Field-wide, 4 policies were stranded the same way
+  (incl. Andre's truecrew:v12 and notsus:v3). **Never champion a membership until
+  it is IN Competition.**
+- **Unblock = retire + re-submit.** Re-submission of a pv with an active membership
+  is rejected (`v2/pipeline.py` "already has an active membership"), so:
+  `coworld retire-membership <lpm_id>` then `coworld submit shivvy:v11 --league …`.
+  Done 2026-06-09 ~17:40Z: v11 now `qualifying` (lpm_40c0232d…). Qualifier rounds
+  run every ~10 min and need only 1 qualifying entrant; each completed round
+  promotes its entrants to Competition with substatus=champion.
+- **Competition is dormant league-wide since ~10:00Z, separately.** Rounds need
+  `minimum_champions=8` champions; only 1 exists (suspectra v33) after the
+  disconnect-penalty wave disqualified everyone. Empty leaderboard for all players.
+  Not fixable from our side; flagged to Andre via Discord DM with both diagnoses.
+- Richard's loop explained: he keeps submitting new versions (→v52); each fresh
+  submission is a `qualifying` membership that gets the next round and promotes.
+  There was never a commissioner preference for him — just nobody else in the
+  `qualifying` state.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**

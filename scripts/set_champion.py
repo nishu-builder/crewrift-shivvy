@@ -6,9 +6,10 @@ The coworld CLI can *view* champions (`coworld memberships --mine
 POST /observatory/v2/league-policy-memberships/{id}/champion.
 
 The champion is the policy that represents your player in a division's live
-rounds. Gotcha: setting a Qualifiers-only membership as champion pulls you OFF
-the Daily leaderboard until it qualifies — so this prefers the Daily membership
-and warns if only a Qualifiers one exists.
+rounds. Gotcha (root-caused 2026-06-09): championing flips the membership to
+status=competing, but qualifier rounds only select status=qualifying entrants —
+so championing a Qualifiers-only membership PERMANENTLY strands it. This script
+now refuses that; champion only after promotion to Competition.
 
 Usage:
   uv run python scripts/set_champion.py            # list our memberships + champion
@@ -67,9 +68,13 @@ def main() -> None:
     target = sorted(matches, key=rank)[0]
     div = (target.get("division") or {}).get("name")
     if div == "Qualifiers" or target.get("status") != "competing":
-        print(f"WARNING: '{want}' is only in {div} (status {target.get('status')}); "
-              f"electing it represents us once it qualifies but may remove our live "
-              f"presence until then.")
+        sys.exit(
+            f"REFUSING: '{want}' is only in {div} (status {target.get('status')}). "
+            f"Championing flips the membership to status=competing, and the qualifier "
+            f"commissioner only selects status=qualifying entrants — this PERMANENTLY "
+            f"strands the policy in Qualifiers (root-caused 2026-06-09; unblock was "
+            f"retire-membership + re-submit). Wait for promotion to Competition, then re-run."
+        )
     mid = target["id"]
     r = httpx.post(f"{BASE}/observatory/v2/league-policy-memberships/{mid}/champion", headers=headers, timeout=30)
     r.raise_for_status()
