@@ -187,6 +187,12 @@ const
   # closes. The imposter prefers victims within this radius of a task center.
   ImposterTaskAmbushRadius = 32
   ButtonResetCooldownLeadTicks = 150
+  # Hold our single emergency button for the mid game: the field dumps theirs
+  # in the first ready window (t~420-560) so the resets overlap, while one
+  # press timed after the crew is actually dying denies a full kill window
+  # exactly when the race is decided.
+  ButtonHoldDeadCrew = 2
+  ButtonHoldLateTicks = 2500
   ProtocolMapName = "sprite protocol map"
   ButtonResetChat = "just resetting imposter cool downs"
   ProwlPointSearchRadius = 24
@@ -335,6 +341,8 @@ type
     lastGameOverText: string
     gameStarted: bool
     roundStartTick: int
+    gameStartTick: int
+    knownDeadCount: int
     buttonResetDecided: bool
     buttonResetPlanned: bool
     buttonResetBanned: bool
@@ -1282,6 +1290,8 @@ proc resetRoundState(bot: var Bot) =
   bot.localized = false
   bot.gameStarted = false
   bot.roundStartTick = -1
+  bot.gameStartTick = -1
+  bot.knownDeadCount = 0
   bot.buttonResetDecided = false
   bot.buttonResetPlanned = false
   bot.buttonResetMeeting = false
@@ -2870,6 +2880,11 @@ proc parseVotingScreen(bot: var Bot): bool {.measure.} =
     for i in 0 ..< read.playerCount:
       bot.voteSlots[i].colorIndex = read.slots[i].colorIndex
       bot.voteSlots[i].alive = read.slots[i].alive
+    var dead = 0
+    for i in 0 ..< read.playerCount:
+      if not read.slots[i].alive:
+        inc dead
+    bot.knownDeadCount = max(bot.knownDeadCount, dead)
     for i in 0 ..< min(bot.voteChoices.len, read.choices.len):
       bot.voteChoices[i] = read.choices[i]
     if read.selfSlot >= 0 and read.selfSlot < read.playerCount:
@@ -3381,7 +3396,9 @@ proc ensureButtonResetPlan(bot: var Bot) =
   bot.buttonResetPlanned = true
 
 proc buttonResetShouldAct(bot: var Bot): bool =
-  ## Returns true when this crewmate should head to the button.
+  ## Returns true when this crewmate should head to the button. The press is
+  ## held for the mid game (ButtonHoldDeadCrew deaths seen in a meeting, or a
+  ## late-game fallback) and still timed just before imposters become ready.
   if bot.buttonResetBanned or bot.roundStartTick < 0:
     return false
   if bot.role != RoleCrewmate or bot.isGhost:
@@ -3389,7 +3406,11 @@ proc buttonResetShouldAct(bot: var Bot): bool =
   bot.ensureButtonResetPlan()
   if not bot.buttonResetPlanned:
     return false
-  bot.frameTick - bot.roundStartTick >= bot.buttonResetCooldownTick()
+  if bot.frameTick - bot.roundStartTick < bot.buttonResetCooldownTick():
+    return false
+  bot.knownDeadCount >= ButtonHoldDeadCrew or
+    (bot.gameStartTick >= 0 and
+      bot.frameTick - bot.gameStartTick >= ButtonHoldLateTicks)
 
 proc buttonResetReady(bot: Bot): bool =
   ## Returns true when the emergency button can be pressed.
@@ -3426,6 +3447,7 @@ proc rememberHome(bot: var Bot) =
     return
   if not bot.gameStarted:
     bot.roundStartTick = bot.frameTick
+    bot.gameStartTick = bot.frameTick
     bot.gameStarted = true
   if bot.homeSet:
     return
@@ -4910,7 +4932,9 @@ proc reportBodyAction(bot: var Bot, x, y: int): uint8 =
 
 proc pressButtonResetAction(bot: var Bot): uint8 =
   ## Presses the emergency button to reset imposter kill cooldowns.
-  bot.intent = "pressing button to reset imposter cool downs"
+  bot.intent = "pressing button to reset imposter cool downs (dead=" &
+    $bot.knownDeadCount & " game tick=" &
+    $(bot.frameTick - bot.gameStartTick) & ")"
   bot.desiredMask = ButtonA
   bot.controllerMask = ButtonA
   bot.clearPath()
@@ -6009,7 +6033,8 @@ when not defined(italkalotLibrary) and not defined(botHeadless):
           $(bot.frameTick - bot.roundStartTick)
         else:
           "unset"
-      ) & " hunt=" & $bot.imposterHuntActive() & "\n" &
+      ) & " hunt=" & $bot.imposterHuntActive() &
+        " dead=" & $bot.knownDeadCount & "\n" &
       "known imps: " & bot.knownImposterSummary() & "\n" &
       "voting: " & $bot.voting &
         " count=" & $bot.votePlayerCount &
