@@ -143,6 +143,56 @@ Richard's submissions (read straight from app_backend v2 source in the m1 repo):
   session: re-run the full diagnosis (role/outcome decomposition, per-loss traces) before
   touching strategy — the optimization target has changed under us.
 
+## UPDATE 2026-06-09 (NEW-META DIAGNOSIS, n=20 fixed-roster + engine source + per-tick logs)
+
+Full re-diagnosis after the meta shift. Evidence: xreq_d177f9ac (n=20, k8s, active
+roster), all 20 of our per-tick logs mined, current engine source read (latest
+coworld-crewrift main).
+
+**Rule changes that flipped the game:**
+- `KillCooldownTicks` 900 -> **500**. Meetings still reset imposter cooldowns, but each
+  reset now only buys 500 ticks; the crew button-lockout is ~2x weaker. Imposters won
+  **14/20** episodes field-wide (was ~2%).
+- Ejections are EXTINCT vs this field: **0 ejections in 20 games**. Our vent detector
+  fired twice (meta bots vent now), we chat-accused in field lingo ("Pink sus" x11,
+  delivered) and voted the confirmed imposter — nobody bandwagons, everyone skips.
+  Deduction has no payoff until the field starts voting sus targets.
+- **Ghosts can do tasks** (engine `applyGhostMovement` has the full task block;
+  `completeTask` pays +1 and counts toward the task win; `totalTasksRemaining` counts
+  dead crews' tasks). Our bot already task-grinds as a ghost — correct, keep.
+- Crew win is now a pure RACE: 4 crew deaths (~t2200-4400 at current kill cadence) vs
+  all 48 tasks (crew wins land ~t3500-4200).
+
+**Our n=20 decomposition (mean 38.95):** crew 4/16 wins (25%, was ~97%) with losses
+worth ~6.5; imposter 2/4 WINS (was 0% — stalking + cooldown 500 is now lethal). The
+whole deficit is crew losses; +25% crew win rate ~= +19 mean. Imposter is fine.
+
+**Ranked strategy changes (crew, in order of expected value):**
+1. **FIX BUG: endgame "localized, no task goal" stall.** In 6/16 crew games (4 losses,
+   2 wins) the bot idles from t~3000 with 1-3 server-incomplete tasks left —
+   `nearestTaskGoal` only targets *visible* task icons and there is no exploration
+   fallback when icons aren't in the local mirror (also: tasks interrupted at hold~1 by
+   a meeting look locally done but aren't). Fix: when own incomplete tasks remain
+   (score-derived or via re-check) and no icon is visible, patrol known task stations.
+   Direct +1-3 pts/game; in the 2 long losses (end t>4100) those tasks plausibly
+   blocked `allTasksDone` — ~100-pt swings.
+2. **Button timing.** We burn our single emergency button at t~420-560 in EVERY game —
+   same moment as the rest of the field (early chat is full of "just resetting imposter
+   cool downs"), so resets overlap and waste lockout coverage. Hold ours for the
+   mid/late game (e.g. after 2 crew deaths, or when estimated imposter-ready time
+   arrives and no meeting happened recently): one well-timed press denies a full
+   500-tick kill window exactly when the race is decided. Note a meeting also
+   teleports everyone home (interrupts tasks) — net EV needs the A/B.
+3. **Task throughput.** Wins finish our 8 tasks by t~2966-3564; the fastest loss ended
+   t2172 (unwinnable on tasks). Shave idle/interstitial ticks and plan around the
+   home-teleport after every meeting (pick post-meeting tasks near home first).
+4. **Don't build more deduction for now** (keep the free vent detector). Re-check
+   monthly: if the field ever starts bandwagoning votes, ejection + ghost-tasks
+   becomes the dominant win path overnight.
+
+**Measurement:** n>=100 fixed-roster A/B per change; compare crew-loss subset and own
+task count, not just the mean (+-8 noise floor).
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
