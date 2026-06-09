@@ -68,6 +68,7 @@ def main() -> None:
     ap.add_argument("requester_policy_version_id")
     ap.add_argument("-n", "--num-episodes", type=int, default=100)
     ap.add_argument("--opponents", default="", help="Comma-separated policy_version_ids (default: top 7 Daily champions).")
+    ap.add_argument("--execution-backend", default="k8s", choices=["k8s", "antfarm"])
     args = ap.parse_args()
 
     headers = {"Authorization": f"Bearer {_load_current_cogames_token(server_url=BASE)}", "Content-Type": "application/json"}
@@ -85,6 +86,7 @@ def main() -> None:
         "num_episodes": args.num_episodes,
         "rotate_seats": True,
         "notes": "self-served via scripts/xp_request.py",
+        "execution_backend": args.execution_backend,
     }
     for attempt in range(6):
         r = httpx.post(f"{BASE}/observatory/v2/experience-requests", headers=headers, json=payload, timeout=90)
