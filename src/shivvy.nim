@@ -1854,6 +1854,15 @@ proc protocolSelfObject(x, y, width, height: int): bool =
   abs(centerX - PlayerScreenX) <= SpriteSize and
     abs(centerY - PlayerScreenY) <= SpriteSize
 
+proc noteVoteDeaths(bot: var Bot) =
+  ## Folds the dead players visible on the committed voting screen into the
+  ## monotone knownDeadCount used to time the held emergency button.
+  var dead = 0
+  for i in 0 ..< bot.votePlayerCount:
+    if not bot.voteSlots[i].alive:
+      inc dead
+  bot.knownDeadCount = max(bot.knownDeadCount, dead)
+
 proc protocolVoteDotColorIndex(label: string): int =
   ## Returns the voter color encoded in a vote dot sprite label.
   for i, colorName in PlayerColorNames:
@@ -1934,6 +1943,7 @@ proc applyProtocolVotingState(
   bot.voteSelfSlot = selfSlot
   for i in 0 ..< playerCount:
     bot.voteSlots[i] = slots[i]
+  bot.noteVoteDeaths()
   for i in 0 ..< bot.voteChoices.len:
     bot.voteChoices[i] = choices[i]
   if selfSlot >= 0 and selfSlot < playerCount:
@@ -2821,6 +2831,7 @@ proc parseVotingCandidate(
       cell.x + 1,
       cell.y + VoteActorSize + 1
     )
+  bot.noteVoteDeaths()
   if bot.voteSkipSelected(layout.skipX, layout.skipY):
     bot.voteCursor = count
   bot.parseVoteDotsForTarget(
@@ -2880,11 +2891,7 @@ proc parseVotingScreen(bot: var Bot): bool {.measure.} =
     for i in 0 ..< read.playerCount:
       bot.voteSlots[i].colorIndex = read.slots[i].colorIndex
       bot.voteSlots[i].alive = read.slots[i].alive
-    var dead = 0
-    for i in 0 ..< read.playerCount:
-      if not read.slots[i].alive:
-        inc dead
-    bot.knownDeadCount = max(bot.knownDeadCount, dead)
+    bot.noteVoteDeaths()
     for i in 0 ..< min(bot.voteChoices.len, read.choices.len):
       bot.voteChoices[i] = read.choices[i]
     if read.selfSlot >= 0 and read.selfSlot < read.playerCount:
