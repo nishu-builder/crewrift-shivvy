@@ -444,6 +444,7 @@ type
     taskStates: seq[TaskState]
     taskAvoidUntil: seq[int]
     taskIconMisses: seq[int]
+    patrolChecked: seq[bool]
     lastTaskRadarResetTick: int
     visibleTaskIcons: seq[IconMatch]
     visibleCrewmates: seq[CrewmateMatch]
@@ -4711,6 +4712,41 @@ proc nearestTaskGoal(
   if bot.buttonFallbackReady():
     return bot.homeGoal()
 
+proc patrolTaskGoal(
+  bot: var Bot
+): tuple[found: bool, index: int, x: int, y: int, name: string, state: TaskState] =
+  ## Returns the nearest unverified task station so an idle endgame walks the
+  ## map re-checking stations instead of standing still. Tasks interrupted at
+  ## the last hold tick (or whose icons were missed off-screen) can be locally
+  ## marked done while the server still counts them; visiting the station lets
+  ## updateTaskIcons self-correct, and moving avoids the server stuck penalty.
+  if bot.patrolChecked.len != bot.sim.tasks.len:
+    bot.patrolChecked = newSeq[bool](bot.sim.tasks.len)
+  for i in 0 ..< bot.sim.tasks.len:
+    if bot.taskIconClearAreaVisible(bot.sim.tasks[i]):
+      bot.patrolChecked[i] = true
+  var allChecked = true
+  for checked in bot.patrolChecked:
+    if not checked:
+      allChecked = false
+      break
+  if allChecked:
+    for i in 0 ..< bot.patrolChecked.len:
+      bot.patrolChecked[i] = false
+  var bestDistance = high(int)
+  for i in 0 ..< bot.sim.tasks.len:
+    if bot.patrolChecked[i]:
+      continue
+    let goal = bot.taskGoalFor(i, TaskMaybe)
+    if not goal.found:
+      bot.patrolChecked[i] = true
+      continue
+    let distance = bot.goalDistance(goal.x, goal.y)
+    if distance < bestDistance:
+      bestDistance = distance
+      result = goal
+      result.name = "recheck " & goal.name
+
 proc coastDistance(velocity: int): int =
   ## Returns how many pixels current velocity will carry without input.
   var speed = abs(velocity)
@@ -5214,7 +5250,9 @@ proc decideNextMaskInner(bot: var Bot): uint8 {.measure.} =
       else:
         "task"
     )
-  let goal = bot.nearestTaskGoal()
+  var goal = bot.nearestTaskGoal()
+  if not goal.found:
+    goal = bot.patrolTaskGoal()
   if not goal.found:
     bot.clearPath()
     bot.intent = "localized, no task goal"
