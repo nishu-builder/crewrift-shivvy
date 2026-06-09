@@ -30,6 +30,19 @@ from coworld.api_client import _load_current_cogames_token
 BASE = "https://softmax.com/api"
 LEAGUE = "league_605ff338-0a2e-4e62-aeda-559df9a9198f"
 
+# A fixed strong roster (7 established top-of-Daily champions, by policy_version
+# id) so every A/B compares against the *same* opponents. Resolved 2026-06-08
+# from the Daily leaderboard. Override with --opponents to use a different field.
+PINNED_ROSTER = {
+    "Richard Higgins": "8663d329-7a36-4968-a534-091b3595d25d",  # crewrift-suspectra-richard:v18
+    "James Bond": "5ac20e88-73e1-4c1d-8d0e-84aebc622e75",  # crewborg:v15
+    "Jernau": "7d482931-b962-456c-99de-3d793116ed72",  # jernau-crewrift:v13
+    "James Boggs": "c4443a86-0a3b-4667-a0d5-30820ef305bc",  # crewborg:v9
+    "RelhAlpha": "34413cf7-6f78-450f-a633-5b81943413e1",  # crewrift-notsus-relhalpha:v4
+    "slava2": "fe0f068c-763c-45b7-a301-f327cd6c80d6",  # tmp-notsus-alibi:v1
+    "Andrew Brower": "95906f0a-1d61-41df-a47c-cee91686b8ae",  # monofuel-notsus:v1
+}
+
 
 def daily_champions(headers: dict[str, str]) -> list[tuple[str, str]]:
     d = httpx.get(
@@ -38,11 +51,15 @@ def daily_champions(headers: dict[str, str]) -> list[tuple[str, str]]:
         headers=headers,
         timeout=30,
     ).json()
+    entries = d if isinstance(d, list) else d.get("entries", [])
     out = []
-    for m in d.get("entries", []):
+    for m in entries:
         if (m.get("division") or {}).get("name") != "Daily":
             continue
-        out.append(((m.get("player") or {}).get("name"), m.get("policy_version_id")))
+        # The API nests the id under policy_version now (top-level
+        # policy_version_id is gone), so read it from there.
+        pv = (m.get("policy_version") or {}).get("id")
+        out.append(((m.get("player") or {}).get("name"), pv))
     return out
 
 
@@ -57,7 +74,7 @@ def main() -> None:
     if args.opponents:
         opponents = args.opponents.split(",")
     else:
-        opponents = [pv for _, pv in daily_champions(headers) if pv and pv != args.requester_policy_version_id][:7]
+        opponents = [pv for pv in PINNED_ROSTER.values() if pv != args.requester_policy_version_id][:7]
     if len(opponents) != 7:
         sys.exit(f"need exactly 7 opponents, got {len(opponents)}")
 

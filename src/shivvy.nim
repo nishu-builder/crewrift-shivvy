@@ -160,6 +160,21 @@ const
   VoteFailsafeTicks = VoteDeadlineTicks * 2 div 3
   VotePanicTicks = VoteDeadlineTicks * 9 div 10
   BodySuspectRange = 64
+  # Vent-sighting deduction (crew). A crewmate cannot vent; only imposters can
+  # teleport between same-group vents. Players move <=~3px/tick, so a player who
+  # vanishes in a couple frames while standing on a vent AND comfortably inside
+  # our view could not have walked off screen -- they vented, so they are an
+  # imposter with zero ambiguity. Margins are sized to dwarf any plausible
+  # walking displacement across the confirm window.
+  VentSightRange = 24         # player center within this of a vent center = "on vent"
+  # The view is 128x128 world px centered on us. A player >=VentViewMargin inside
+  # every edge cannot walk off-view within the confirm window (speed ~3px/tick),
+  # so vanishing there means they vented. Must be < ScreenWidth div 2 (=64) to
+  # leave a usable central band.
+  VentViewMargin = 40         # last-seen pos must be this far inside every screen edge
+  VentConfirmMissFrames = 2   # consecutive absent frames to confirm the disappearance
+  VentMaxGapFrames = 3        # only a fresh disappearance (within this gap) counts
+  VentKillExcludeFrames = 30  # a body seen this recently => the color died, not vented
   ImposterHuntDelayTicks = 500
   # A crewmate sitting on a task station is stationary and distracted, so it is
   # catchable -- unlike a moving crewmate, which an equal-speed tail-chase never
@@ -359,6 +374,11 @@ type
     bodySeenTicks: array[PlayerColorCount, int]
     selfColorIndex: int
     knownImposters: array[PlayerColorCount, bool]
+    crewWorldTick: array[PlayerColorCount, int]
+    crewWorldX: array[PlayerColorCount, int]
+    crewWorldY: array[PlayerColorCount, int]
+    crewOnVent: array[PlayerColorCount, bool]
+    crewVentMiss: array[PlayerColorCount, int]
     voting: bool
     votePlayerCount: int
     voteCursor: int
@@ -1296,6 +1316,12 @@ proc resetRoundState(bot: var Bot) =
     bot.bodySeenTicks[i] = 0
   for i in 0 ..< bot.knownImposters.len:
     bot.knownImposters[i] = false
+  for i in 0 ..< PlayerColorCount:
+    bot.crewWorldTick[i] = 0
+    bot.crewWorldX[i] = 0
+    bot.crewWorldY[i] = 0
+    bot.crewOnVent[i] = false
+    bot.crewVentMiss[i] = 0
   bot.goalIndex = -1
   bot.goalName = ""
   bot.hasGoal = false
@@ -4377,6 +4403,31 @@ proc clearInvalidBodySusChat(bot: var Bot) =
   if (" " & bot.pendingChat.normalizeChatText() & " ").contains(" sus "):
     bot.pendingChat = ""
 
+proc knownImposterVotingTarget(bot: Bot): int =
+  ## Returns a confirmed-imposter color (e.g. caught venting) as a safe living
+  ## vote slot, or VoteUnknown. Crew only -- never vote out our own kind blind.
+  if bot.role == RoleImposter:
+    return VoteUnknown
+  for c in 0 ..< PlayerColorCount:
+    if not bot.knownImposterColor(c):
+      continue
+    let slot = bot.voteSlotForColor(c)
+    if bot.voteTargetSafeForRole(slot):
+      return slot
+  VoteUnknown
+
+proc maybeQueueVentAccusation(bot: var Bot) =
+  ## Broadcasts a chat accusation against a vent-confirmed imposter so the other
+  ## crew bots can bandwagon the vote (one vote rarely ejects on its own).
+  if bot.role == RoleImposter or bot.pendingChat.len > 0:
+    return
+  let slot = bot.knownImposterVotingTarget()
+  if slot == VoteUnknown:
+    return
+  let color = bot.voteSlots[slot].colorIndex
+  bot.pendingChat = titlePlayerColorName(color) & " sus"
+  echo "voting chat: ", bot.pendingChat, " (vent-confirmed imposter)"
+
 proc desiredVotingDecision(
   bot: Bot,
   listenedTicks: int
@@ -4405,6 +4456,13 @@ proc desiredVotingDecision(
       false
     )
 
+  let ventTarget = bot.knownImposterVotingTarget()
+  if ventTarget != VoteUnknown:
+    return (
+      ventTarget,
+      "saw " & bot.voteTargetName(ventTarget) & " vent (confirmed imposter)",
+      true
+    )
   if bot.buttonResetMeeting:
     return (
       bot.votePlayerCount,
@@ -4446,6 +4504,7 @@ proc decideVotingMask(bot: var Bot): uint8 {.measure.} =
   bot.clearPath()
   bot.clearInvalidBodySusChat()
   bot.maybeQueueImposterSusChat()
+  bot.maybeQueueVentAccusation()
   let ownVote = bot.selfVoteChoice()
   let listenedTicks =
     if bot.voteStartTick >= 0:
@@ -5024,6 +5083,59 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
   bot.goalIndex = goal.index
   bot.navigateToPoint(goal.x, goal.y, "fake target " & goal.name)
 
+proc onVentCenter(bot: Bot, wx, wy: int): bool =
+  ## Returns true when a world point sits on (within VentSightRange of) a vent.
+  for v in bot.sim.vents:
+    if heuristic(wx, wy, v.x + v.w div 2, v.y + v.h div 2) <= VentSightRange:
+      return true
+
+proc worldInSafeView(bot: Bot, wx, wy: int): bool =
+  ## True when a world point is comfortably inside the current camera view, far
+  ## enough from every edge that a normal-speed player there could not leave the
+  ## view within the confirm window.
+  wx >= bot.cameraX + VentViewMargin and
+    wx < bot.cameraX + ScreenWidth - VentViewMargin and
+    wy >= bot.cameraY + VentViewMargin and
+    wy < bot.cameraY + ScreenHeight - VentViewMargin
+
+proc detectVentSightings(bot: var Bot) =
+  ## Flags any crewmate color that vanished while standing on a vent inside our
+  ## view as a confirmed imposter. Crewmates cannot vent; only imposters teleport
+  ## between vents. Player speed is ~3px/tick, so a player on a vent that is >=
+  ## VentViewMargin inside the view who disappears within VentConfirmMissFrames
+  ## could not have walked off screen -- they vented. Kills (a fresh body of that
+  ## color) are excluded; only fresh disappearances count.
+  var seenThisFrame: array[PlayerColorCount, bool]
+  for crewmate in bot.visibleCrewmates:
+    let c = crewmate.colorIndex
+    if c < 0 or c >= PlayerColorCount:
+      continue
+    seenThisFrame[c] = true
+    let w = bot.visibleCrewmateWorld(crewmate)
+    bot.crewWorldTick[c] = bot.frameTick
+    bot.crewWorldX[c] = w.x
+    bot.crewWorldY[c] = w.y
+    bot.crewOnVent[c] = bot.onVentCenter(w.x, w.y) and bot.worldInSafeView(w.x, w.y)
+    bot.crewVentMiss[c] = 0
+  for c in 0 ..< PlayerColorCount:
+    if seenThisFrame[c] or c == bot.selfColorIndex:
+      continue
+    if not bot.crewOnVent[c] or bot.knownImposterColor(c):
+      continue
+    if bot.frameTick - bot.crewWorldTick[c] > VentMaxGapFrames:
+      bot.crewOnVent[c] = false  # stale (e.g. resumed after a meeting)
+      continue
+    if bot.bodySeenTicks[c] != 0 and
+        bot.frameTick - bot.bodySeenTicks[c] <= VentKillExcludeFrames:
+      bot.crewOnVent[c] = false  # they were killed, not vented
+      continue
+    inc bot.crewVentMiss[c]
+    if bot.crewVentMiss[c] >= VentConfirmMissFrames:
+      bot.knownImposters[c] = true
+      bot.crewOnVent[c] = false
+      echo "VENT SIGHTING: ", playerColorName(c),
+        " vanished on a vent -> confirmed imposter"
+
 proc decideNextMaskInner(bot: var Bot): uint8 {.measure.} =
   ## Updates perception and chooses the next input mask.
   let centerStart = getMonoTime()
@@ -5061,6 +5173,8 @@ proc decideNextMaskInner(bot: var Bot): uint8 {.measure.} =
     bot.thought("waiting for a reliable map lock")
     return 0
   bot.rememberHome()
+  if bot.role != RoleImposter and not bot.isGhost:
+    bot.detectVentSightings()
   if bot.role == RoleImposter and not bot.isGhost:
     return bot.decideImposterMask()
   if not bot.isGhost:
