@@ -175,6 +175,12 @@ const
   VentConfirmMissFrames = 2   # consecutive absent frames to confirm the disappearance
   VentMaxGapFrames = 3        # only a fresh disappearance (within this gap) counts
   VentKillExcludeFrames = 30  # a body seen this recently => the color died, not vented
+  # Reconnect aggressively on a mid-game socket drop: the server ends the game and
+  # hands out a -100 penalty if we are gone ~30s, and cloud swarms drop sockets
+  # often. Retry fast; only stop once the game is actually over (we saw a win/draw
+  # screen) or after a cap safely past the 30s game-stop (server is gone).
+  ReconnectSleepMs = 100
+  ReconnectGiveUpMs = 40_000
   ImposterHuntDelayTicks = 500
   # A crewmate sitting on a task station is stationary and distracted, so it is
   # catchable -- unlike a moving crewmate, which an equal-speed tail-chase never
@@ -6063,6 +6069,7 @@ when not defined(italkalotLibrary):
         else: nil
       connected = false
       notifiedFailure = false
+      lastAlive = getMonoTime()
     while viewer.viewerOpen():
       try:
         let ws = newWebSocket(connectUrl)
@@ -6098,6 +6105,7 @@ when not defined(italkalotLibrary):
               )
           if not receivedFrame:
             continue
+          lastAlive = getMonoTime()
           bot.frameTick += client.frameAdvance
           bot.frameBufferLen = client.frameBufferLen
           bot.framesDropped = client.framesDropped
@@ -6141,22 +6149,33 @@ when not defined(italkalotLibrary):
                 ws.send(chatBlob(bot.pendingChat), BinaryMessage)
                 bot.pendingChat = ""
       except Exception as e:
-        if connected:
-          echo "connection lost: ", e.msg
-          if exitOnDisconnect:
-            break
-        elif not notifiedFailure:
-          echo "connection failed: ", e.msg
-          notifiedFailure = true
         connected = false
+        # A clean game-over close: the result screen was shown, so the episode is
+        # scored -- exit instead of reconnecting into a dead game.
+        if exitOnDisconnect and bot.lastGameOverText.len > 0:
+          echo "connection closed after game over (", bot.lastGameOverText,
+            ") -- exiting"
+          break
+        # Otherwise treat it as a transient/cloud drop (or a not-yet-ready server)
+        # and reconnect aggressively, so we are back well inside the server's ~30s
+        # disconnect window and never eat the -100 penalty. Give up only if no
+        # working connection returns for a window safely past that game-stop.
+        if not notifiedFailure:
+          echo "connection lost: ", e.msg, " -- reconnecting"
+          notifiedFailure = true
+        if exitOnDisconnect and
+            (getMonoTime() - lastAlive).inMilliseconds > ReconnectGiveUpMs:
+          echo "no working connection for ", ReconnectGiveUpMs,
+            "ms and no game-over -- exiting"
+          break
         if gui:
           let reconnectStart = getMonoTime()
           while viewer.viewerOpen() and
-              (getMonoTime() - reconnectStart).inMilliseconds < 250:
+              (getMonoTime() - reconnectStart).inMilliseconds < ReconnectSleepMs:
             viewer.pumpViewer(bot, connected, connectUrl)
             sleep(10)
         else:
-          sleep(250)
+          sleep(ReconnectSleepMs)
 
 when isMainModule and not defined(italkalotLibrary):
   type
