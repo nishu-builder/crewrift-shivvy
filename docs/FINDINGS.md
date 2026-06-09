@@ -121,6 +121,28 @@ Richard's submissions (read straight from app_backend v2 source in the m1 repo):
   There was never a commissioner preference for him — just nobody else in the
   `qualifying` state.
 
+## UPDATE 2026-06-09 (reconnect fix proven live; disconnect issue filed upstream; META SHIFTED)
+
+- **Reconnect fix validated in production.** shivvy:v10 (exit-on-first-disconnect) took
+  exactly -100 three times in its last Competition round (`round_813cc7f1`) — the
+  disqualification pattern. shivvy:v11 played the first post-recovery round
+  (`round_0d3c713a`, 162 episodes) with **zero negative scores**, and a fresh n=20 XP run
+  had 20/20 single-connect clean game-over exits (no drops observed on the k8s XP path).
+- **Upstream default player analyzed + issue filed:**
+  [Metta-AI/coworld-crewrift#43](https://github.com/Metta-AI/coworld-crewrift/issues/43).
+  Server grace is 30s (`sim.nim DisconnectTimeoutTicks = TargetFps*30`, penalty -100);
+  upstream notsus now reconnects (`exitOnDisconnect` hardcoded false) but only for
+  `ReconnectWindowMs = 8s` and with no game-over detection — it gives up 22s before the
+  server would, and burns the full window even on normal post-game closes.
+- **THE META SHIFTED (task-distance normalization + stronger imposters).** Same-day n=20
+  XP vs an active roster: mean **38.95** — 12/20 crew LOSSES (5-8 pts), and **2 imposter
+  WINS (120 = win + 2 kills)**. The "crew ~97% win / imposter structurally dead" ceiling
+  diagnosis above is **stale**: imposters now win regularly field-wide, and crew-loss
+  prevention (deduction/ejection, survival) is suddenly the dominant score lever. v11's
+  league mean is drifting down (75.8 -> 73.1, rank 2 -> 6 as rounds accumulate). Next
+  session: re-run the full diagnosis (role/outcome decomposition, per-loss traces) before
+  touching strategy — the optimization target has changed under us.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
