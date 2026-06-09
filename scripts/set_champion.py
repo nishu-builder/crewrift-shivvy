@@ -56,12 +56,20 @@ def main() -> None:
     matches = [m for m in members if label(m) == want or (m.get("policy_version") or {}).get("id") == want]
     if not matches:
         sys.exit(f"no membership found for '{want}'")
-    daily = [m for m in matches if (m.get("division") or {}).get("name") == "Daily"]
-    target = daily[0] if daily else matches[0]
+    # Prefer the live competition membership (a competing, non-Qualifiers slot) so
+    # we champion the entry that actually appears on the leaderboard. Fall back to
+    # whatever exists (e.g. a still-qualifying Qualifiers membership) otherwise.
+    def rank(m: dict) -> int:
+        div = (m.get("division") or {}).get("name") or ""
+        live = m.get("status") == "competing" and div != "Qualifiers"
+        return (0 if live else 1, 0 if div != "Qualifiers" else 1)
+
+    target = sorted(matches, key=rank)[0]
     div = (target.get("division") or {}).get("name")
-    if div != "Daily":
-        print(f"WARNING: '{want}' has no Daily membership (only {div}); electing it will "
-              f"remove our Daily presence until it qualifies.")
+    if div == "Qualifiers" or target.get("status") != "competing":
+        print(f"WARNING: '{want}' is only in {div} (status {target.get('status')}); "
+              f"electing it represents us once it qualifies but may remove our live "
+              f"presence until then.")
     mid = target["id"]
     r = httpx.post(f"{BASE}/observatory/v2/league-policy-memberships/{mid}/champion", headers=headers, timeout=30)
     r.raise_for_status()
