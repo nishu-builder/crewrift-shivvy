@@ -196,6 +196,7 @@ const
   ProtocolMapName = "sprite protocol map"
   ButtonResetChat = "just resetting imposter cool downs"
   ProwlPointSearchRadius = 24
+  FleeBodyMinDist = 150
   ProwlPoints = [
     (x: 216, y: 252),
     (x: 365, y: 434),
@@ -320,7 +321,7 @@ type
     isGhost: bool
     ghostIconFrames: int
     imposterKillReady: bool
-    imposterGoalIndex: int
+    stalkColorIndex: int
     imposterProwlIndex: int
     packed: seq[uint8]
     unpacked: seq[uint8]
@@ -1302,7 +1303,7 @@ proc resetRoundState(bot: var Bot) =
   bot.isGhost = false
   bot.ghostIconFrames = 0
   bot.imposterKillReady = false
-  bot.imposterGoalIndex = -1
+  bot.stalkColorIndex = -1
   bot.imposterProwlIndex = -1
   bot.cameraLock = NoLock
   bot.cameraScore = 0
@@ -3846,51 +3847,6 @@ proc homeGoal(
     return bot.buttonGoal()
   (true, -1, bestX, bestY, "Home", TaskMaybe)
 
-proc fakeTargetCount(bot: Bot): int =
-  ## Returns the number of imposter fake target areas.
-  bot.sim.tasks.len + 1
-
-proc fakeTargetGoalFor(
-  bot: Bot,
-  index: int
-): tuple[found: bool, index: int, x: int, y: int, name: string, state: TaskState] =
-  ## Returns an imposter fake goal for a task or the button.
-  if index == bot.sim.tasks.len:
-    return bot.buttonGoal()
-  bot.taskGoalFor(index, TaskMaybe)
-
-proc randomFakeTargetIndex(bot: var Bot): int =
-  ## Returns a random imposter fake target index.
-  let count = bot.fakeTargetCount()
-  if count == 0:
-    return -1
-  bot.rng.rand(count - 1)
-
-proc fakeTargetCenter(
-  bot: Bot,
-  index: int
-): tuple[x: int, y: int] =
-  ## Returns the center point for an imposter fake target.
-  if index == bot.sim.tasks.len:
-    let button = bot.sim.gameMap.button
-    return (button.x + button.w div 2, button.y + button.h div 2)
-  bot.sim.tasks[index].taskCenter()
-
-proc farthestFakeTargetIndexFrom(bot: Bot, originX, originY: int): int =
-  ## Returns the fake target farthest from an origin point.
-  var bestDistance = low(int)
-  result = -1
-  for i in 0 ..< bot.fakeTargetCount():
-    let center = bot.fakeTargetCenter(i)
-    let distance = heuristic(originX, originY, center.x, center.y)
-    if distance > bestDistance:
-      bestDistance = distance
-      result = i
-
-proc farthestFakeTargetIndex(bot: Bot): int =
-  ## Returns the fake target farthest from the current player location.
-  bot.farthestFakeTargetIndexFrom(bot.playerWorldX(), bot.playerWorldY())
-
 proc prowlPointCount(bot: Bot): int =
   ## Returns the number of imposter prowl points.
   ProwlPoints.len
@@ -3938,18 +3894,48 @@ proc prowlGoalFor(
     TaskMaybe
   )
 
-proc randomProwlPointIndex(bot: var Bot, previous = -1): int =
-  ## Returns a random prowl point index, avoiding the previous one.
-  let count = bot.prowlPointCount()
-  if count == 0:
+proc nextProwlPointIndex(bot: var Bot, previous: int): int =
+  ## Returns the next patrol stop: random among the 3 nearest other prowl
+  ## points, so the patrol drifts between adjacent hunting grounds instead of
+  ## hopping across the map.
+  var candidates: seq[tuple[distance, index: int]]
+  for i in 0 ..< ProwlPoints.len:
+    if i == previous:
+      continue
+    candidates.add((
+      heuristic(
+        bot.playerWorldX(),
+        bot.playerWorldY(),
+        ProwlPoints[i].x,
+        ProwlPoints[i].y
+      ),
+      i
+    ))
+  if candidates.len == 0:
     return -1
-  if previous < 0 or previous >= count:
-    return bot.rng.rand(count - 1)
-  if count == 1:
-    return 0
-  result = bot.rng.rand(count - 2)
-  if result >= previous:
-    inc result
+  candidates.sort()
+  candidates.setLen(min(3, candidates.len))
+  candidates[bot.rng.rand(candidates.len - 1)].index
+
+proc nearestProwlPointIndex(bot: Bot, awayFromX = -1, awayFromY = -1): int =
+  ## Returns the prowl point nearest the player, optionally skipping points
+  ## within FleeBodyMinDist of a position to leave (a fresh body).
+  var bestDistance = high(int)
+  result = -1
+  for i in 0 ..< ProwlPoints.len:
+    if awayFromX >= 0 and heuristic(
+        awayFromX, awayFromY, ProwlPoints[i].x, ProwlPoints[i].y
+      ) < FleeBodyMinDist:
+      continue
+    let distance = heuristic(
+      bot.playerWorldX(),
+      bot.playerWorldY(),
+      ProwlPoints[i].x,
+      ProwlPoints[i].y
+    )
+    if distance < bestDistance:
+      bestDistance = distance
+      result = i
 
 proc visibleCrewmateWorld(
   bot: Bot,
@@ -3975,6 +3961,7 @@ proc nearestVisibleCrewmate(
 ): tuple[found: bool, crewmate: CrewmateMatch] =
   ## Returns the best visible kill target not known as an imposter: prefer the
   ## nearest crewmate parked on a task (catchable), else the nearest overall.
+  ## Use stickyVisibleCrewmate for stalk/chase so the target does not flap.
   var bestDistance = high(int)
   var bestParked = high(int)
   var parked: tuple[found: bool, crewmate: CrewmateMatch]
@@ -3998,6 +3985,27 @@ proc nearestVisibleCrewmate(
       parked = (true, crewmate)
   if parked.found:
     return parked
+
+proc stickyVisibleCrewmate(
+  bot: var Bot
+): tuple[found: bool, crewmate: CrewmateMatch] =
+  ## Sticky kill-target selection: hold the current target color while it stays
+  ## visible so the stalk/chase does not flap between equidistant crewmates and
+  ## waste travel. Parked-on-task targets still win -- they are the catchable
+  ## ones (an equal-speed tail-chase on a moving target never closes).
+  let best = bot.nearestVisibleCrewmate()
+  if not best.found:
+    bot.stalkColorIndex = -1
+    return best
+  if bot.stalkColorIndex >= 0 and
+      best.crewmate.colorIndex != bot.stalkColorIndex:
+    let world = bot.visibleCrewmateWorld(best.crewmate)
+    if not bot.nearTaskStation(world.x, world.y):
+      for crewmate in bot.visibleCrewmates:
+        if crewmate.colorIndex == bot.stalkColorIndex:
+          return (true, crewmate)
+  bot.stalkColorIndex = best.crewmate.colorIndex
+  best
 
 proc visibleBodyWorld(bot: Bot, body: BodyMatch): tuple[x: int, y: int] =
   ## Converts one visible body match into world coordinates.
@@ -5035,7 +5043,6 @@ proc attackVisibleCrewmate(
   ## Chases a visible crewmate and kills as soon as possible.
   let target = bot.visibleCrewmateWorld(crewmate)
   if bot.imposterKillReady and bot.inKillRange(target.x, target.y):
-    bot.imposterGoalIndex = bot.farthestFakeTargetIndex()
     bot.intent = "kill " & name
     # The kill is edge-triggered (like vote confirm), so holding ButtonA every
     # frame fires only once -- an edge-of-range miss then never re-fires. Pulse
@@ -5062,15 +5069,14 @@ proc attackVisibleCrewmate(
   mask
 
 proc navigateProwlPoint(bot: var Bot): uint8 =
-  ## Navigates between random prowl points after the hunt timer expires.
+  ## Patrols prowl points: start at the nearest hunting ground, then drift to
+  ## an adjacent one whenever the current point is reached and empty.
   if bot.imposterProwlIndex < 0 or
       bot.imposterProwlIndex >= bot.prowlPointCount():
-    bot.imposterProwlIndex = bot.randomProwlPointIndex()
+    bot.imposterProwlIndex = bot.nearestProwlPointIndex()
   var goal = bot.prowlGoalFor(bot.imposterProwlIndex)
   if not goal.found:
-    bot.imposterProwlIndex = bot.randomProwlPointIndex(
-      bot.imposterProwlIndex
-    )
+    bot.imposterProwlIndex = bot.nextProwlPointIndex(bot.imposterProwlIndex)
     goal = bot.prowlGoalFor(bot.imposterProwlIndex)
   if not goal.found:
     bot.intent = "imposter idle, unreachable prowl point"
@@ -5078,9 +5084,7 @@ proc navigateProwlPoint(bot: var Bot): uint8 =
     return 0
   if heuristic(bot.playerWorldX(), bot.playerWorldY(), goal.x, goal.y) <=
       TaskPreciseApproachRadius:
-    bot.imposterProwlIndex = bot.randomProwlPointIndex(
-      bot.imposterProwlIndex
-    )
+    bot.imposterProwlIndex = bot.nextProwlPointIndex(bot.imposterProwlIndex)
     goal = bot.prowlGoalFor(bot.imposterProwlIndex)
     if not goal.found:
       bot.intent = "imposter idle, no next prowl point"
@@ -5103,7 +5107,7 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
   bot.taskHoldTicks = 0
   bot.taskHoldIndex = -1
   if bot.imposterHuntActive():
-    let hunted = bot.nearestVisibleCrewmate()
+    let hunted = bot.stickyVisibleCrewmate()
     if hunted.found:
       return bot.attackVisibleCrewmate(
         hunted.crewmate,
@@ -5112,20 +5116,24 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
     return bot.navigateProwlPoint()
   let body = bot.nearestBody()
   if body.found:
-    bot.imposterGoalIndex = bot.farthestFakeTargetIndexFrom(body.x, body.y)
-    let fleeGoal = bot.fakeTargetGoalFor(bot.imposterGoalIndex)
-    if fleeGoal.found:
-      bot.goalIndex = fleeGoal.index
-      return bot.navigateToPoint(
-        fleeGoal.x,
-        fleeGoal.y,
-        "flee body to " & fleeGoal.name
-      )
+    # Leave the body's immediate area toward the nearest hunting ground instead
+    # of crossing the map: ejection threat is ~zero in this field, so flee
+    # distance only wastes cooldown we should spend repositioning next to crew.
+    let fleeIndex = bot.nearestProwlPointIndex(body.x, body.y)
+    if fleeIndex >= 0:
+      let fleeGoal = bot.prowlGoalFor(fleeIndex)
+      if fleeGoal.found:
+        bot.goalIndex = fleeGoal.index
+        return bot.navigateToPoint(
+          fleeGoal.x,
+          fleeGoal.y,
+          "flee body to " & fleeGoal.name
+        )
   # On cooldown (not yet huntActive) with no body to flee: shadow the nearest
   # crewmate so we are already in range the instant the kill comes off cooldown,
   # instead of faking a distant task. Aggressive imposter: maximize kills to
   # thin the crew below the imposter count before they finish their tasks.
-  let stalk = bot.nearestVisibleCrewmate()
+  let stalk = bot.stickyVisibleCrewmate()
   if stalk.found:
     let target = bot.visibleCrewmateWorld(stalk.crewmate)
     bot.goalIndex = -2
@@ -5134,27 +5142,10 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
       target.y,
       "stalking " & playerColorName(stalk.crewmate.colorIndex)
     )
-  if bot.imposterGoalIndex < 0 or
-      bot.imposterGoalIndex >= bot.fakeTargetCount():
-    bot.imposterGoalIndex = bot.randomFakeTargetIndex()
-  var goal = bot.fakeTargetGoalFor(bot.imposterGoalIndex)
-  if not goal.found:
-    bot.imposterGoalIndex = bot.randomFakeTargetIndex()
-    goal = bot.fakeTargetGoalFor(bot.imposterGoalIndex)
-  if not goal.found:
-    bot.intent = "imposter idle, unreachable fake target"
-    bot.thought("imposter idle, unreachable fake target")
-    return 0
-  if heuristic(bot.playerWorldX(), bot.playerWorldY(), goal.x, goal.y) <=
-      TaskPreciseApproachRadius:
-    bot.imposterGoalIndex = bot.randomFakeTargetIndex()
-    goal = bot.fakeTargetGoalFor(bot.imposterGoalIndex)
-    if not goal.found:
-      bot.intent = "imposter idle, no next fake target"
-      bot.thought("imposter idle, no next fake target")
-      return 0
-  bot.goalIndex = goal.index
-  bot.navigateToPoint(goal.x, goal.y, "fake target " & goal.name)
+  # Nobody visible while on cooldown: patrol the nearest hunting ground so a
+  # stalk target appears before the kill is ready (was: random fake-task walk
+  # that parked us hundreds of px from any crewmate).
+  bot.navigateProwlPoint()
 
 proc onVentCenter(bot: Bot, wx, wy: int): bool =
   ## Returns true when a world point sits on (within VentSightRange of) a vent.
@@ -5452,7 +5443,7 @@ proc initBot(mapPath = ""): Bot {.measure.} =
   result.lastCameraX = result.cameraX
   result.lastCameraY = result.cameraY
   result.taskHoldIndex = -1
-  result.imposterGoalIndex = -1
+  result.stalkColorIndex = -1
   result.imposterProwlIndex = -1
   result.goalIndex = -1
   result.clearPath()
@@ -6033,7 +6024,7 @@ when not defined(italkalotLibrary) and not defined(botHeadless):
         " ghost=" & $bot.isGhost &
         " ghost icon frames=" & $bot.ghostIconFrames &
         " kill ready=" & $bot.imposterKillReady &
-        " imp goal=" & $bot.imposterGoalIndex &
+        " stalk=" & playerColorName(bot.stalkColorIndex) &
         " prowl=" & $bot.imposterProwlIndex & "\n" &
       "round tick=" & (
         if bot.roundStartTick >= 0:
