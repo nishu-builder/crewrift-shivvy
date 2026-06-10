@@ -238,6 +238,95 @@ small. The honest frontier vs this field is now imposter-side play (we win ~55%
 of imposter games; field-best is similar) — or accepting v11 as the ceiling and
 re-measuring when the meta drifts.
 
+## UPDATE 2026-06-10 (imposter-side push: diagnosis, leader replay, v14/v15)
+
+**Engine check (user asked about "Andre's timer changes"):** read latest
+coworld-crewrift master + the live game_config from our own XP episodes. Net
+state: `killCooldownTicks=500` (briefly 300 on 06-08, restored same day),
+meetings still reset all imposter cooldowns to full, task-distance rebalance as
+diagnosed. Nothing newer; live league config confirms 500/240 votes/720
+disconnect ticks. Imposters strong because of the 900->500 cut we already knew.
+
+**Imposter waste diagnosis (14 imposter episodes from the v13 runs, mined):**
+time-in-state across ~40k ticks: stalk 36%, meetings 29%, prowl 18%,
+fake-target 15%, chase/kill 3%. A third of imposter time was spent NOT near any
+crewmate: random fake-task walks (one 631px trek right before kill-ready),
+random cross-map prowl hops, flee-to-farthest-fake-target after kills, and
+stalk-target flapping (yellow->orange->blue->yellow). First kill lands t~1340-1540
+in EVERY game (the field's early-button wave paces it -- parity with leaders;
+not fixable), but later kills came 60-900 ticks after cooldown-ready.
+
+**Leader replay (crewborg-v23, Aaron Landy, 140-pt 4-kill game decoded):** he
+kills at +1, +1, +11, +147 ticks after each cooldown-ready moment. The whole
+formula is: be glued to a victim when ready, every time. No vents, no
+isolation-waiting; co-imposter scored 100 with 0 kills (the strong imposter
+carries). Confirms positioning is the entire imposter game.
+
+**v14 (sticky stalk target + nearest-prowl positioning + short body-flee +
+fake-task wander deleted):** mechanism verified in cloud (ready-to-kill latency
+median 94t, many kills at +6..+38; was often hundreds). A/B vs v11, 3 elite
+pairs n=300/arm: **dead even** (29.24 vs 29.33). Elite imposter wins 28/72 vs
+33/72 (noise). Two v14 -100s were INFRA (k8s node unreachable; log-fetch
+i/o-timeout on exactly our pods; no crash). Mixed-roster pair (league bottom
+half): also even (64.03 vs 64.37) -- but vs the weak half our imposter is
+already ~96% (23/24) and v11's was 83%, so no headroom there.
+
+**League-mean decomposition (important for measurement):** our league 46.3 =
+~64 vs the weak-half roster, ~30 vs the elite-7 roster. A/B only on the elite
+roster systematically mismeasures what climbs the actual leaderboard. Keep
+running BOTH rosters.
+
+**v15 (hunt memory):** the remaining latency outliers (+316, +359, +1398) were
+all "nobody visible at kill-ready". Added imposter-side last-seen tracking
+(rememberCrewmatePositions; the crew path's vent-detector arrays were never
+updated for imposters) + chase the freshest lead when no crewmate is visible
+(lastSeenCrewmateGoal/followHuntLead). Leads age out after 350t, are cleared on
+meetings (teleport-home invalidates them), are dropped on arrival (48px;
+12px never triggers when the point sits in collision) and dropped immediately
+when unreachable (path=0 + no movement -- otherwise the bot wall-idles).
+Verified in scrims: 100+ lead-follows, zero idle-at-wall, 2-3 kill imposter
+games.
+
+**v15 A/B verdict + THE BUTTON HOLD WAS A REGRESSION (mixed roster caught it).**
+Elite pairs (3x n=100/arm): even (v15 pooled ~35.7 vs v11 ~37.5; elite imposter
+wins 37/72 vs 36/72). But on the MIXED roster v15's CREW win rate cratered and
+it reproduced across 3 pairs: 29/28/34% vs v11's 50/55/39% (pooled 30% vs 48%,
+-18pp, z>3). Imposter code cannot touch crew games; the cause is the v13 button
+hold. Mechanism (log-verified): the field presses emergency buttons SERIALLY in
+the early game -- each press extends the imposter cooldown lockout chain by
+~660 ticks (meeting ~310 + reset 500, overlapped). Holding our press DEFECTS
+from that collective defense, so in OUR crew games enemy imposters get their
+first kill earlier; in v15 mixed crew losses our press fired only after 2 crew
+were already dead (t~1900) or never (2/8 died holding it). Vs elites the effect
+is invisible because those crew games are mostly lost regardless -- which is
+exactly why measuring only on the elite roster was a trap. **Reverted in v16**
+(early press restored; patrol fix + imposter package kept). LESSON: a "no
+effect on the elite roster" result does NOT clear a change for the league; the
+leaderboard is ~half weak-field games, and game-theoretic levers (defecting
+from a collective lockout) can be invisible at one margin and disastrous at
+the other.
+
+**v16 ship-gate (2 mixed + 2 elite pairs vs v11, n=400/arm): crew regression
+GONE, overall a wash — NOT submitted; v11 stays champion.** Mixed 58.1/71.1 vs
+56.0/68.9 (crew 35/49% vs 37/48% — parity restored, so the patrol fix is clean
+and the button hold alone was the regression), elite 31.7/29.5 vs 32.0/30.9.
+Mixed imposter 96%/96% (at ceiling). v16 = patrol fix + imposter package
+(sticky stalk, nearest-prowl, short flee, hunt memory) + early button restored:
+mechanically the best version, measurably equal to v11. Submitting would
+auto-champion it on qualifier promotion — not justified for a wash.
+
+**Where the next climb must come from (mapped, unbuilt):** league mean = ~50/50
+weak-half and elite games. (1) Crew win rate vs the mixed field is the dominant
+lever (we are at v11-parity ~48%; leader-level play implies higher) — the loss
+mode is 4 crew dead before ~48 tasks; candidate directions: survival/evasion
+when an imposter shadows us, faster collective task completion, or playing the
+deduction game if the field ever starts voting. (2) Elite-imposter win rate
+(~40-50%): our positioning now matches the leader's mechanics (kill latency
++6..+94 vs his +1); the residual gap is target acquisition out of view —
+already half-closed by hunt memory — and the co-imposter lottery, which no code
+of ours controls. Expect single-digit gains at best; measure on BOTH rosters,
+3+ pairs each, before believing anything.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
