@@ -206,6 +206,38 @@ allTasksDone win-flips need long stalemate games that this field no longer produ
 the stack. Note: roster strength is drifting fast intra-day — always rerun the v-control
 alongside any candidate, never reuse an old control run.
 
+**A/B RESULT — v13 button timing (2026-06-09, 3 paired runs of n=100/arm, matched
+roster): NO EFFECT; pooled n=300/300 v13 37.38 vs v11 36.79 (+0.6, z=0.15).**
+v13 = v12 patrol fix + held emergency button: keep our single press until a vote
+screen has shown >=2 dead (`noteVoteDeaths`, monotone `knownDeadCount`) or game
+tick >=2500, still timed `killCooldownTicks-150` after the last meeting. Built and
+verified end-to-end: local self-play presses moved t~420-560 -> game tick 2500-3800
+with staggered coverage; cloud logs show presses at tick 2523-2685 tagged
+`dead=1-3`, zero early presses; fast crew wins (<t2500) correctly end with the
+button unspent. Two implementation gotchas worth keeping: (1) there are THREE
+vote-screen parsers (`applyProtocolVotingState` — the live protocol path —
+`parseVotingCandidate`, `parseVotingScreen`); death counting must hook all three
+or it silently reads dead=0 on the league build. (2) The GUI debug dump is not the
+headless trace; tag verification data into `bot.intent` (the press line carries
+`dead=N game tick=T`).
+
+Why no gain: crew win rate pooled 18% (42/228) vs 20% (45/228) — the lever's
+target metric didn't move. Vs this field (~55-60% of episodes end in imposter
+wins) one 500-tick lockout, however well timed, is not pivotal: crew losses are
+decided by elite-imposter kill cadence across the whole lobby, and our press is
+1 of up to 6. **Individual pairs swung +8.3, +6.2, -12.7 — a fixed roster does
+NOT bound noise to +-8 at n=100; field-internal dynamics (role draws, kill luck)
+swing per-100 means by ~+-13.** Any future claim needs pooled paired runs
+(n>=300/arm) or a per-episode paired design. **v13 NOT submitted** (does not beat
+champion); the code is kept on main as correct, risk-free latent behavior (the
+held button would matter in a meta with longer games or fewer early meetings).
+Levers #1 (patrol) and #2 (button timing) are now both spent without mean
+movement; lever #3 (task throughput) and crew survival are what remain on the
+crew side, but with crew-loss games worth ~6.7 the realistic per-game upside is
+small. The honest frontier vs this field is now imposter-side play (we win ~55%
+of imposter games; field-best is similar) — or accepting v11 as the ceiling and
+re-measuring when the meta drifts.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
