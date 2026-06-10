@@ -187,6 +187,10 @@ const
   # closes. The imposter prefers victims within this radius of a task center.
   ImposterTaskAmbushRadius = 32
   ButtonResetCooldownLeadTicks = 150
+  # End of the far-task expedition window: first deaths in the field land
+  # t~1790 (imposters are button-locked until ~1450), so long hauls are safe
+  # before this and dangerous after.
+  ExpeditionEndTick = 1800
   ProtocolMapName = "sprite protocol map"
   ButtonResetChat = "just resetting imposter cool downs"
   ProwlPointSearchRadius = 24
@@ -4705,6 +4709,25 @@ proc inKillRange(bot: Bot, targetX, targetY: int): bool =
     dy = ay - by
   dx * dx + dy * dy <= bot.sim.config.killRange * bot.sim.config.killRange
 
+proc taskRouteScore(bot: Bot, x, y: int): int =
+  ## Routing score for picking the next task (lower is better). Three phases
+  ## shaped by the forced home trips and the early imposter lockout (no deaths
+  ## observed before t~1790; the field's button chain holds imposters until
+  ## ~t1450): while our button press is pending we are anchored to home, so do
+  ## near-home tasks; after the press, expedition out to the far tasks while
+  ## the lockout lasts; afterwards plain nearest -- what remains is near home
+  ## by construction, cheap to resume after each meeting teleports us home.
+  ## Ghosts cannot die and just take the nearest task.
+  result = bot.goalDistance(x, y)
+  if not bot.homeSet or bot.isGhost:
+    return
+  let homeDist = heuristic(bot.homeX, bot.homeY, x, y)
+  if not bot.buttonResetBanned:
+    result += homeDist
+  elif bot.gameStartTick >= 0 and
+      bot.frameTick - bot.gameStartTick < ExpeditionEndTick:
+    result -= 3 * homeDist div 2
+
 proc nearestTaskGoal(
   bot: Bot
 ): tuple[
@@ -4715,7 +4738,9 @@ proc nearestTaskGoal(
   name: string,
   state: TaskState
 ] {.measure.} =
-  ## Returns the closest known active task station center.
+  ## Returns the best known active task station center: nearest among locally
+  ## visible icons (free pickups), otherwise routed outward-in by
+  ## taskRouteScore.
   var bestDistance = high(int)
   for i in 0 ..< bot.sim.tasks.len:
     if not bot.taskIconVisibleFor(bot.sim.tasks[i]):
@@ -4744,7 +4769,7 @@ proc nearestTaskGoal(
     let goal = bot.taskGoalFor(i, TaskMandatory)
     if not goal.found:
       continue
-    let distance = bot.goalDistance(goal.x, goal.y)
+    let distance = bot.taskRouteScore(goal.x, goal.y)
     if distance < bestDistance:
       bestDistance = distance
       result = goal
@@ -4773,7 +4798,7 @@ proc nearestTaskGoal(
     let goal = bot.taskGoalFor(i, TaskMaybe)
     if not goal.found:
       continue
-    let distance = bot.goalDistance(goal.x, goal.y)
+    let distance = bot.taskRouteScore(goal.x, goal.y)
     if distance < bestDistance:
       bestDistance = distance
       result = goal
@@ -4793,7 +4818,7 @@ proc nearestTaskGoal(
     let goal = bot.taskGoalFor(i, TaskMaybe)
     if not goal.found:
       continue
-    let distance = bot.goalDistance(goal.x, goal.y)
+    let distance = bot.taskRouteScore(goal.x, goal.y)
     if distance < bestDistance:
       bestDistance = distance
       result = goal
