@@ -197,6 +197,13 @@ const
   ButtonResetChat = "just resetting imposter cool downs"
   ProwlPointSearchRadius = 24
   FleeBodyMinDist = 150
+  # Last-seen crew positions go stale fast (players move ~3px/tick), so hunt
+  # memory only chases sightings fresher than this.
+  HuntMemoryMaxAge = 350
+  # A lead is "reached" well before the 12px task radius: within this range an
+  # actual crewmate would be visible, and the remembered point may sit inside
+  # collision where the pathfinder can only stop adjacent (path=0 idling).
+  HuntLeadArriveRadius = 48
   ProwlPoints = [
     (x: 216, y: 252),
     (x: 365, y: 434),
@@ -322,6 +329,7 @@ type
     ghostIconFrames: int
     imposterKillReady: bool
     stalkColorIndex: int
+    huntLeadColor: int
     imposterProwlIndex: int
     packed: seq[uint8]
     unpacked: seq[uint8]
@@ -1304,6 +1312,7 @@ proc resetRoundState(bot: var Bot) =
   bot.ghostIconFrames = 0
   bot.imposterKillReady = false
   bot.stalkColorIndex = -1
+  bot.huntLeadColor = -1
   bot.imposterProwlIndex = -1
   bot.cameraLock = NoLock
   bot.cameraScore = 0
@@ -1631,6 +1640,9 @@ proc updateLocation(bot: var Bot) {.measure.} =
     bot.clearButtonResetMeeting()
   if wasInterstitial:
     bot.roundStartTick = bot.frameTick
+    # Meetings teleport everyone home; pre-meeting sightings are wrong now.
+    for i in 0 ..< PlayerColorCount:
+      bot.crewWorldTick[i] = 0
     if not protocolMapReady:
       bot.reseedLocalizationAtHome()
   if protocolMapReady:
@@ -3986,6 +3998,55 @@ proc nearestVisibleCrewmate(
   if parked.found:
     return parked
 
+proc rememberCrewmatePositions(bot: var Bot) =
+  ## Records last-seen world positions of visible crewmates (the imposter-side
+  ## twin of detectVentSightings' tracking) to hunt toward when nobody is
+  ## visible at kill-ready time.
+  for crewmate in bot.visibleCrewmates:
+    let c = crewmate.colorIndex
+    if c < 0 or c >= PlayerColorCount or c == bot.selfColorIndex:
+      continue
+    let w = bot.visibleCrewmateWorld(crewmate)
+    bot.crewWorldTick[c] = bot.frameTick
+    bot.crewWorldX[c] = w.x
+    bot.crewWorldY[c] = w.y
+
+proc lastSeenCrewmateGoal(
+  bot: var Bot
+): tuple[found: bool, x: int, y: int, name: string] =
+  ## Returns the freshest remembered live-crewmate position, if recent enough
+  ## to still be a useful hunt lead. A lead we have reached without sighting
+  ## anyone is dropped on the spot -- they are not here anymore.
+  var bestTick = 0
+  var bestColor = -1
+  for c in 0 ..< PlayerColorCount:
+    if c == bot.selfColorIndex or bot.knownImposterColor(c):
+      continue
+    if bot.bodySeenTicks[c] != 0:
+      continue
+    if bot.crewWorldTick[c] <= 0 or
+        bot.frameTick - bot.crewWorldTick[c] > HuntMemoryMaxAge:
+      continue
+    if heuristic(
+        bot.playerWorldX(),
+        bot.playerWorldY(),
+        bot.crewWorldX[c],
+        bot.crewWorldY[c]
+      ) <= HuntLeadArriveRadius:
+      bot.crewWorldTick[c] = 0
+      continue
+    if bot.crewWorldTick[c] <= bestTick:
+      continue
+    bestTick = bot.crewWorldTick[c]
+    bestColor = c
+    result = (
+      true,
+      bot.crewWorldX[c],
+      bot.crewWorldY[c],
+      "last seen " & playerColorName(c)
+    )
+  bot.huntLeadColor = bestColor
+
 proc stickyVisibleCrewmate(
   bot: var Bot
 ): tuple[found: bool, crewmate: CrewmateMatch] =
@@ -5093,6 +5154,15 @@ proc navigateProwlPoint(bot: var Bot): uint8 =
   bot.goalIndex = goal.index
   bot.navigateToPoint(goal.x, goal.y, goal.name)
 
+proc followHuntLead(bot: var Bot, x, y: int, name: string): uint8 =
+  ## Navigates toward a hunt lead; an unreachable lead (no path, no movement)
+  ## is dropped immediately instead of idling at a wall until it ages out.
+  bot.goalIndex = -2
+  result = bot.navigateToPoint(x, y, name)
+  if result == 0 and not bot.hasPathStep and bot.huntLeadColor >= 0:
+    bot.crewWorldTick[bot.huntLeadColor] = 0
+    result = bot.navigateProwlPoint()
+
 proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
   ## Chooses imposter movement and kill behavior.
   bot.radarDots.setLen(0)
@@ -5106,6 +5176,7 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
     bot.checkoutTasks[i] = false
   bot.taskHoldTicks = 0
   bot.taskHoldIndex = -1
+  bot.rememberCrewmatePositions()
   if bot.imposterHuntActive():
     let hunted = bot.stickyVisibleCrewmate()
     if hunted.found:
@@ -5113,6 +5184,9 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
         hunted.crewmate,
         "hunting " & playerColorName(hunted.crewmate.colorIndex)
       )
+    let memory = bot.lastSeenCrewmateGoal()
+    if memory.found:
+      return bot.followHuntLead(memory.x, memory.y, memory.name)
     return bot.navigateProwlPoint()
   let body = bot.nearestBody()
   if body.found:
@@ -5142,9 +5216,12 @@ proc decideImposterMask(bot: var Bot): uint8 {.measure.} =
       target.y,
       "stalking " & playerColorName(stalk.crewmate.colorIndex)
     )
-  # Nobody visible while on cooldown: patrol the nearest hunting ground so a
-  # stalk target appears before the kill is ready (was: random fake-task walk
-  # that parked us hundreds of px from any crewmate).
+  # Nobody visible while on cooldown: chase the freshest sighting, else patrol
+  # the nearest hunting ground so a stalk target appears before the kill is
+  # ready (was: random fake-task walk that parked us hundreds of px away).
+  let memory = bot.lastSeenCrewmateGoal()
+  if memory.found:
+    return bot.followHuntLead(memory.x, memory.y, memory.name)
   bot.navigateProwlPoint()
 
 proc onVentCenter(bot: Bot, wx, wy: int): bool =
@@ -5444,6 +5521,7 @@ proc initBot(mapPath = ""): Bot {.measure.} =
   result.lastCameraY = result.cameraY
   result.taskHoldIndex = -1
   result.stalkColorIndex = -1
+  result.huntLeadColor = -1
   result.imposterProwlIndex = -1
   result.goalIndex = -1
   result.clearPath()
