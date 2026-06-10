@@ -327,6 +327,43 @@ already half-closed by hunt memory — and the co-imposter lottery, which no cod
 of ours controls. Expect single-digit gains at best; measure on BOTH rosters,
 3+ pairs each, before believing anything.
 
+## UPDATE 2026-06-10 (crew-death diagnosis + v17 phased task routing: wash)
+
+**Crew-death diagnosis (15 v16 crew-loss logs, 9 deaths):** only 2/9 died
+parked on a task; 7/9 died IN TRANSIT on long hauls (A* path 150-600px), far
+from home (520-930px), at t=1787-3308. ZERO deaths before t~1790: the field's
+serial button chain makes the early game universally safe. Moving deaths are
+head-on corridor interceptions (equal-speed tail chases never close -- which is
+also why parked kills are what imposters hunt for). Implication: anti-parking
+evasion targets the wrong mode; transit exposure in the mid/late game is the
+real risk. Caveat that capped expectations: imposter kill rate is
+cooldown-bound, not target-bound, and ghosts keep tasking, so individual
+survival has limited team leverage.
+
+**v17 (phased task routing, refined from Nishad's farthest-task-first idea):**
+anchor near home while our button press is pending, expedition to far-from-home
+tasks during the safe window (< t1800), plain nearest afterwards (remaining
+tasks are near home by construction, cheap to resume after meeting teleports).
+Verified locally (anchor->685px expedition; tasks still 7-8/8) but the window
+only fits 2-3 far tasks. **Gate vs v11 (2 mixed + 2 elite pairs, n=400/arm):
+WASH** -- mixed 62.9 vs 64.3 pooled (crew win 41% vs 40%), elite 30.4 vs 30.9
+(crew win 17% vs 13%). NOT submitted. Note the raw "always farthest first"
+version would be strictly worse: it pushes long hauls into the dangerous
+window.
+
+**Honest state after v13-v17:** five candidates, every properly-gated
+comparison vs v11 is a wash (one regression caught and reverted). v11 ~= v16 ~=
+v17 within +-2 on both rosters. Single-bot crew changes appear capped: crew win
+rate is a 6-player collective outcome, our task/vote/button/ghost play is
+already near-optimal, and our 1/6 contribution margin is under the measurement
+noise even at n=400/arm. The imposter side is at the weak-field ceiling (96%+)
+and elite-imposter outcomes hinge on the co-imposter lottery. Realistic options
+now: (a) accept v11 as our level and re-measure when the meta shifts (watch for
+the field starting to VOTE -- that flips deduction into the dominant lever
+overnight and we already have the vent detector), (b) pursue fundamentally
+collective angles (e.g., chat-coordinated crew behavior with allied bots'
+conventions), or (c) spend effort elsewhere.
+
 ## TL;DR state (as of this handoff)
 
 - Best version: **v7** — ~**81.7 mean, 74% win, 5/100 zero-games, 0 vote penalties**
