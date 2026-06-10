@@ -187,12 +187,6 @@ const
   # closes. The imposter prefers victims within this radius of a task center.
   ImposterTaskAmbushRadius = 32
   ButtonResetCooldownLeadTicks = 150
-  # Hold our single emergency button for the mid game: the field dumps theirs
-  # in the first ready window (t~420-560) so the resets overlap, while one
-  # press timed after the crew is actually dying denies a full kill window
-  # exactly when the race is decided.
-  ButtonHoldDeadCrew = 2
-  ButtonHoldLateTicks = 2500
   ProtocolMapName = "sprite protocol map"
   ButtonResetChat = "just resetting imposter cool downs"
   ProwlPointSearchRadius = 24
@@ -3416,9 +3410,11 @@ proc ensureButtonResetPlan(bot: var Bot) =
   bot.buttonResetPlanned = true
 
 proc buttonResetShouldAct(bot: var Bot): bool =
-  ## Returns true when this crewmate should head to the button. The press is
-  ## held for the mid game (ButtonHoldDeadCrew deaths seen in a meeting, or a
-  ## late-game fallback) and still timed just before imposters become ready.
+  ## Returns true when this crewmate should head to the button: at the first
+  ## imposter-ready window, joining the field's serial early-button chain.
+  ## (Holding the press for the mid game was A/B'd 2026-06-10 and LOSES vs the
+  ## mixed field: defecting from the early lockout chain hands enemy imposters
+  ## an earlier first kill in our crew games. See FINDINGS.md.)
   if bot.buttonResetBanned or bot.roundStartTick < 0:
     return false
   if bot.role != RoleCrewmate or bot.isGhost:
@@ -3426,11 +3422,7 @@ proc buttonResetShouldAct(bot: var Bot): bool =
   bot.ensureButtonResetPlan()
   if not bot.buttonResetPlanned:
     return false
-  if bot.frameTick - bot.roundStartTick < bot.buttonResetCooldownTick():
-    return false
-  bot.knownDeadCount >= ButtonHoldDeadCrew or
-    (bot.gameStartTick >= 0 and
-      bot.frameTick - bot.gameStartTick >= ButtonHoldLateTicks)
+  bot.frameTick - bot.roundStartTick >= bot.buttonResetCooldownTick()
 
 proc buttonResetReady(bot: Bot): bool =
   ## Returns true when the emergency button can be pressed.
